@@ -4,8 +4,15 @@ import math
 import os
 
 def calc_doench_score(seq):
-    # https://media.nature.com/original/nature-assets/nbt/journal/v32/n12/extref/nbt.3026-S1.pdf
-    # https://github.com/maximilianh/crisporWebsite/blob/master/doenchScore.py
+    '''
+    Calculate on-target activity score of sgRNA by Cas9 genome editing
+    Input seq: 30-mer (4bp + 20bp sgRNA + 3bp PAM + 3bp)
+    Output: score
+    
+    Score and parameters were obtained from original papter as follows:
+     - https://media.nature.com/original/nature-assets/nbt/journal/v32/n12/extref/nbt.3026-S1.pdf
+     - https://github.com/maximilianh/crisporWebsite/blob/master/doenchScore.py
+    '''
     
     params = [
         (1,'G',-0.2753771),   (2,'A',-0.3238875),   (2,'C',0.17212887),   (3,'C',-0.1006662),
@@ -28,8 +35,8 @@ def calc_doench_score(seq):
     ]
     
     intercept =  0.59763615
-    gc_high    = -0.1665878
-    gc_low     = -0.2026259
+    gc_high = -0.1665878
+    gc_low = -0.2026259
 
     score = intercept
     
@@ -63,8 +70,8 @@ def find_sgRNA_in_polyc_regoin(fasta, cutoff=0.7):
                     seed_seq = entry.sequence[start+6:end-3]
                     sgRNA = entry.sequence[start:end]
                     if filter_homopolymer(seed_seq):
-                        yield entry.name, start, end, sgRNA, score
-                    
+                        yield entry.name, str(start), str(end), sgRNA, str(score)
+                        
 def filter_homopolymer(seq):
     patterns = ['AAA', 'GGG', 'TTT', 'CCC']
     for p in patterns:
@@ -77,6 +84,6 @@ if __name__ == '__main__':
     #fasta = 'data/chr1.fa'
     path = '/Users/yukke//dev/data/iGenomes/Homo_sapiens/UCSC/hg19/Sequence/Chromosomes/'
     for fasta in os.listdir(path):
-        for sg in find_sgRNA_in_polyc_regoin(os.path.join(path, fasta)):
-            print sg
+        for sg in find_sgRNA_in_polyc_regoin(os.path.join(path, fasta), cutoff=0.0):
+            print ','.join(sg)
     
