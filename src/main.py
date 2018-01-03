@@ -1,7 +1,10 @@
 import pysam
+import HTSeq
 import re
 import math
 import os
+import collections
+import argparse
 
 def calc_doench_score(seq):
     '''
@@ -56,22 +59,22 @@ def calc_doench_score(seq):
             score += weight
     return 1.0/(1.0+math.exp(-score))
 
-def find_sgRNA_in_polyc_regoin(fasta, cutoff=0.7):
+def find_sgRNA_in_polyc_regoin(fasta, db):
     p = re.compile(r'C{6}[ATGC]{14}[ATGC][G]{2}')
+    result = collections.namedtuple('PolycGuideRnaResult', ['chr', 'start', 'end', 'guide', 'score', 'is_exon'])
     with pysam.FastxFile(fasta) as fh:
         for entry in fh:
             for m in p.finditer(entry.sequence):
-                candidate = m.group()
                 start = m.start()
                 end = m.end()
                 score_seq = entry.sequence[start-4:end+3]
                 score = calc_doench_score(score_seq)
-                if score > cutoff:
-                    seed_seq = entry.sequence[start+6:end-3]
-                    sgRNA = entry.sequence[start:end]
-                    if filter_homopolymer(seed_seq):
-                        yield entry.name, str(start), str(end), sgRNA, str(score)
-                        
+                seed_seq = entry.sequence[start+6:end-3]
+                sgRNA = entry.sequence[start:end]
+                if filter_homopolymer(seed_seq):
+                    is_in_exon = find_exon(entry.name, start, end, db)
+                    yield result(entry.name, start, end, sgRNA, score, is_in_exon)
+
 def filter_homopolymer(seq):
     patterns = ['AAA', 'GGG', 'TTT', 'CCC']
     for p in patterns:
@@ -80,10 +83,32 @@ def filter_homopolymer(seq):
     else:
         return True
 
+def generate_gff_db(path):
+    db = {}
+    for gff in HTSeq.GFF_Reader(path):
+        if gff.type == 'exon' and gff.iv.strand == '+':
+            db[gff.attr['transcript_id']] = gff
+    return db
+
+def find_exon(sg_chrom, sg_start, sg_end, db):
+    for gene_name, gff_attr in db.items():
+        if gff_attr.iv.chrom == sg_chrom and gff_attr.iv.start > sg_start and gff_attr.iv.end < sg_end:
+            return gene_name
+    else:
+        return False
+    
+def main(args):
+    gff_db = generate_gff_db('data/genes.gtf')
+    for fasta in os.listdir(args.fasta_dir):
+        for sg in find_sgRNA_in_polyc_regoin(os.path.join(args.fasta_dir, fasta), gff_db):
+            if sg.score > args.cutoff:
+                print '%s,%d,%d,%s,%f,%s' % (sg.chr, sg.start, sg.end, sg.guide, sg.score, sg.is_exon)
+                
+                
 if __name__ == '__main__':
-    #fasta = 'data/chr1.fa'
-    path = '/Users/yukke//dev/data/iGenomes/Homo_sapiens/UCSC/hg19/Sequence/Chromosomes/'
-    for fasta in os.listdir(path):
-        for sg in find_sgRNA_in_polyc_regoin(os.path.join(path, fasta), cutoff=0.0):
-            print ','.join(sg)
+    parser = argparse.ArgumentParser(description='Find sgRNA candidates in the polyC region')
+    parser.add_argument('--fasta_dir', action='store', required=True, type=str, help='Fasta directly')
+    parser.add_argument('--cutoff', action='store', default=0.1, type=float, help='Min threshold of sgRNA activity score [Default: 0.1]')
+    args = parser.parse_args()
+    main(args)
     
