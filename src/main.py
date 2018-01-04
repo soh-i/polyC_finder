@@ -60,8 +60,12 @@ def calc_doench_score(seq):
     return 1.0/(1.0+math.exp(-score))
 
 def find_sgRNA_in_polyc_regoin(fasta, db):
+    '''
+    Search polyC region that can be targeted by spCas9 (PAM is NGG)
+    '''
+    
     p = re.compile(r'C{6}[ATGC]{14}[ATGC][G]{2}')
-    result = collections.namedtuple('PolycGuideRnaResult', ['chr', 'start', 'end', 'guide', 'score', 'is_exon'])
+    result = collections.namedtuple('PolycGuideRnaResult', ['chr', 'start', 'end', 'guide', 'PAM', 'score', 'is_exon'])
     with pysam.FastxFile(fasta) as fh:
         for entry in fh:
             for m in p.finditer(entry.sequence):
@@ -71,9 +75,11 @@ def find_sgRNA_in_polyc_regoin(fasta, db):
                 score = calc_doench_score(score_seq)
                 seed_seq = entry.sequence[start+6:end-3]
                 sgRNA = entry.sequence[start:end]
+                pam = sgRNA[-3:]
                 if filter_homopolymer(seed_seq):
-                    is_in_exon = find_exon(entry.name, start, end, db)
-                    yield result(entry.name, start, end, sgRNA, score, is_in_exon)
+                    query_iv = HTSeq.GenomicInterval(entry.name, start, end, '+')
+                    is_exon_overlapped = find_exon(query_iv, db)
+                    yield result(entry.name, start, end, sgRNA, pam, score, is_exon_overlapped)
 
 def filter_homopolymer(seq):
     patterns = ['AAA', 'GGG', 'TTT', 'CCC']
@@ -90,25 +96,31 @@ def generate_gff_db(path):
             db[gff.attr['transcript_id']] = gff
     return db
 
-def find_exon(sg_chrom, sg_start, sg_end, db):
-    for gene_name, gff_attr in db.items():
-        if gff_attr.iv.chrom == sg_chrom and gff_attr.iv.start > sg_start and gff_attr.iv.end < sg_end:
-            return gene_name
+def find_exon(q_iv, db):
+    '''
+    To test whether sgRNA candidate is overlapped with known exon of genes
+    '''
+    
+    for k, v in db.items():
+        if v.iv.overlaps(q_iv):
+            return k
     else:
         return False
-    
+        
+
 def main(args):
-    gff_db = generate_gff_db('data/genes.gtf')
+    gff_db = generate_gff_db(args.gff)
     for fasta in os.listdir(args.fasta_dir):
         for sg in find_sgRNA_in_polyc_regoin(os.path.join(args.fasta_dir, fasta), gff_db):
             if sg.score > args.cutoff:
-                print '%s,%d,%d,%s,%f,%s' % (sg.chr, sg.start, sg.end, sg.guide, sg.score, sg.is_exon)
-                
+                print '%s,%d,%d,%s,%s,%f,%s' % (sg.chr, sg.start, sg.end, sg.guide, sg.PAM, sg.score, sg.is_exon)
+
                 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Find sgRNA candidates in the polyC region')
     parser.add_argument('--fasta_dir', action='store', required=True, type=str, help='Fasta directly')
     parser.add_argument('--cutoff', action='store', default=0.1, type=float, help='Min threshold of sgRNA activity score [Default: 0.1]')
+    parser.add_argument('--gff', action='store', required=True, default=0.1, type=str, help='Path to GFF file')
     args = parser.parse_args()
     main(args)
     
