@@ -81,21 +81,25 @@ def find_sgRNA_in_polyc_regoin(fasta, db):
                     is_exon_overlapped = find_exon(query_iv, db)
                     yield result(entry.name, start, end, sgRNA, pam, score, is_exon_overlapped)
                     
-def find_sgRNA_in_polyc_regoin2(pattern, fasta):
-    result = collections.namedtuple('PolycGuideRnaResult', ['chr', 'start', 'end', 'guide', 'PAM', 'score', 'is_exon'])
+def find_sgRNA_in_polyc_regoin2(pattern, pattern_name, fasta, gffdb):
+    result = collections.namedtuple('PolycGuideRnaResult', ['chr', 'start', 'end', 'guide', 'PAM', 'score', 'is_exon', 'w_type'])
     with pysam.FastxFile(fasta) as fh:
         for entry in fh:
             for m in pattern.finditer(entry.sequence):
-                start = m.start()
-                end = m.end()
-                score_seq = entry.sequence[start-4:end+3]
-                score = calc_doench_score(score_seq)
-                seed_seq = entry.sequence[start+6:end-3]
+                end = m.end() # include PAM
+                start = m.end() - 23
+
+                # calculate score using 30-mer
+                score_30mer = entry.sequence[start-4:end+3]
+                score = calc_doench_score(score_30mer)
+                
                 sgRNA = entry.sequence[start:end]
                 pam = sgRNA[-3:]
-                #if filter_homopolymer(seed_seq):
-                is_exon_overlapped = 0
-                yield result(entry.name, start, end, sgRNA, pam, score, is_exon_overlapped)
+                
+                # find overlap with known exon
+                query_iv = HTSeq.GenomicInterval(entry.name, start, end, '+')
+                is_exon_overlapped = find_exon(query_iv, gffdb)
+                yield result(entry.name, start, end, sgRNA, pam, score, is_exon_overlapped, pattern_name)
 
 def filter_homopolymer(seq):
     patterns = ['AAA', 'GGG', 'TTT', 'CCC']
@@ -122,7 +126,10 @@ def find_exon(q_iv, db):
             return k
     else:
         return False
-    
+
+def die(msg):
+    raise SystemExit(msg)
+
 def main(args):
     gff_db = generate_gff_db(args.gff)
     for fasta in os.listdir(args.fasta_dir):
@@ -138,20 +145,26 @@ def main(args):
 #    args = parser.parse_args()
 #    main(args)
 
-
-if __name__ == '__main__':
+def find_polyC_in_window():
     fa_dir = 'data/hg19'
+    gff_db = generate_gff_db('data/test.gtf')
     
-    # w1: 26bp-21bp
+    # 6bp sliding window for polyC region
+    # w1: 26bp-21bp from PAM
     w1_p = re.compile(r'C{6}[ATGC]{20}[ATGC][G]{2}')
-    # w2: 15bp-20bp
-    w2_p = re.compile(r'C{6}[ATGC]{14}[ATGC][G]{2}')
-    # w3: 08bp-14bp
+    # w3: 08bp-14bp from PAM
     w3_p = re.compile(r'[ATGC]{6}[C]{6}[ATGC]{8}[ATGC][G]{2}')
-    # w4: 02bp-07bp
+    # w4: 02bp-07bp from PAM
     w4_p = re.compile(r'[ATGC]{12}[C]{6}[ATGC]{2}[ATGC][G]{2}')
     
+    search_patterns = [(w1_p, 'w1_26:21'), (w3_p, 'w3_08:14'), (w4_p, 'w4_02:07')]
     for fasta in os.listdir(fa_dir):
-        for sg in find_sgRNA_in_polyc_regoin2(w4_p, os.path.join(fa_dir, fasta)):
-            print sg
+        for pat, pat_name in search_patterns:
+            for sg in find_sgRNA_in_polyc_regoin2(pat, pat_name, os.path.join(fa_dir, fasta), gff_db):
+                if sg.score > 0.7:
+                    print '%s,%d,%d,%s,%s,%f,%s,%s' % (sg.chr, sg.start, sg.end, sg.guide, sg.PAM, sg.score, sg.is_exon, pat_name)
+
+                    
+if __name__ == '__main__':
+    find_polyC_in_window()
     
