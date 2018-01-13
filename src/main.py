@@ -146,8 +146,8 @@ def main(args):
 #    main(args)
 
 def find_polyC_in_window():
-    fa_dir = 'data/hg19'
-    gff_db = generate_gff_db('data/test.gtf')
+    fa_dir = '/Users/yukke/dev/data/iGenomes/Homo_sapiens/UCSC/hg19/Sequence/Chromosomes'
+    gff_db = generate_gff_db('data/genes.gtf')
     
     # 6bp sliding window for polyC region
     # w1: 26bp-21bp from PAM
